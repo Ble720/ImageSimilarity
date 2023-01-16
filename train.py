@@ -4,7 +4,7 @@ import torch.nn as nn
 import torch.nn.functional as F
 import numpy as np
 from DataLoader import DataLoader
-from SimilarityModel import SimilarityModel
+from Sim_Model import Sim_Model
 import torchvision.models as models
 
 def train(model, criterion, optimizer, batch_size, epoch, nf):

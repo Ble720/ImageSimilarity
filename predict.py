@@ -1,5 +1,5 @@
 import os
-from SimilarityModel import ViT_Sim
+from Sim_Model import Sim_Model
 from DataLoader import DataLoader
 import torchvision.models as models
 import torch.nn as nn
