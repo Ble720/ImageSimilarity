@@ -1,5 +1,11 @@
-import random, os, cv2, torch
+import random, os
+from PIL import Image, ImageFilter
+import torch
+import torch.nn as nn
+import torchvision.transforms.functional as tf
 import numpy as np
+
+
 
 class DataLoader:
     def __init__(self, source, target, num_false, batch_size):
@@ -10,37 +16,9 @@ class DataLoader:
         self.index = 0
         self.data = []
         self.create_pairs()
-    
-    def create_pairs(self):
-        pairs = []
-        for sRoot, sDirs, sFiles in os.walk(self.source_path):
-            for sfile in sFiles:
-                correct_path = './target/{}.png'.format(sfile[:-4])
-                pairs.append(os.path.join(sRoot, sfile).replace('\\', '/'), correct_path, 1)
-                random_target = random.choices([os.path.join('target', p) for p in os.listdir(self.target_path) if p != sfile], k=self.n_false)
 
-                for path in random_target:
-                    pairs.append(os.path.join(sRoot, sfile).replace('\\', '/'), './target/' + path, 0)
-
-        random.shuffle(pairs)
-        self.data = pairs
-
-    def readImg(self, name):
-        img = cv2.imread(name, cv2.IMREAD_COLOR)
-        img = cv2.cvtColor(img, cv2.COLOR_BGR2RGB)
-        #img = cv2.filter
-        img = cv2.resize(img, (224,224)).transpose([2, 1, 0])
-        img = torch.tensor(img.astype(np.float64)).unsqueeze(0)
-        return img/255
-
-    def getImgLblBatch(self, pairs):
-        img_1, img_2, labels = [], [], []
-        for path_1, path_2, label in pairs:
-            img_1.append(self.readImg(path_1))
-            img_2.append(self.readImg(path_2))
-            labels.append(label)
-
-        return torch.cat(img_1, dim=0), torch.cat(img_2, dim=0), torch.tensor(label)
+    def __iter__(self):
+        return self
 
     def __next__(self):
         if self.index == -1:
@@ -55,5 +33,45 @@ class DataLoader:
             self.index = -1
             
         return self.getImgLblBatch(batch)
+    
+    def create_pairs(self):
+        pairs = []
+        for sRoot, sDirs, sFiles in os.walk(self.source_path):
+            for sfile in sFiles:
+                add = []
+                source = os.path.join(sRoot, sfile).replace('\\', '/')
+                correct_path = './target/{}'.format(sfile)
+                add.append([source, correct_path, 1])
+                random_target = random.choices([os.path.join(path, img).replace('\\', '/') for path, subdirs, imgs in os.walk(self.target_path) for img in imgs if img not in correct_path], k=self.n_false)
+
+                for path in random_target:
+                    add.append([source, path, -1])
+                random.shuffle(add)
+                pairs.append(add)
+
+        random.shuffle(pairs)
+        pairs = [ex for batch in pairs for ex in batch]
+        self.data = pairs
+
+    def readImg(self, path):
+        img = Image.open(path)
+        img = img.convert('RGB')
+        #img = img.filter(ImageFilter.GaussianBlur(radius=2))
+        #img = img.filter(ImageFilter.EMBOSS)
+        img = img.resize((224,224))
+        img = tf.to_tensor(img)
+        img = tf.normalize(img, (0.485, 0.456, 0.406), (0.229, 0.224, 0.225)).unsqueeze(0)
+        return img
+
+    def getImgLblBatch(self, pairs):
+        img_1, img_2, labels = [], [], []
+        for path_1, path_2, label in pairs:
+            img_1.append(self.readImg(path_1))
+            img_2.append(self.readImg(path_2))
+            labels.append(label)
+
+        return torch.cat(img_1, dim=0).to('cuda'), torch.cat(img_2, dim=0).to('cuda'), torch.tensor(labels).type(torch.float32).to('cuda')# pairs[:-1]
+
+    
 
     
