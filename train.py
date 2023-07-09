@@ -6,40 +6,48 @@ from DataLoader import DataLoader
 from ModelCombo import ModelCombo
 
 from match import *
-from tqdm.notebook import trange
+from tqdm import tqdm
 
 import argparse
 
 
-def train(model, optimizer, batch_size, epoch, src_path, trg_path, sv_path):
+def train(model, optimizer, batch_size, epoch, src_path, trg_path, sv_path, eval, metrics):
     model.train()
-    with open('loss_epoch.txt', 'w') as f:
-        with open('eval_score.txt', 'w') as es:
-            for e in trange(epoch):
-                losses = []
-                print('Epoch {}'.format(e))
-                for img, label in DataLoader(src_path, trg_path, batch_size, augments=True):
 
-                    if img.shape[0] != batch_size*2:
-                        continue
+    log_avg_loss = []
+    log_eval_acc = []
 
-                    optimizer.zero_grad()
-                    pred = model(img)
-                    loss = contrast_loss_func(pred, label, 0.05)
-                    loss.backward()
-                    optimizer.step()
-                    print('Total loss for this batch: {}'.format(loss.item()))
-                    losses.append(loss.item())
-                save_weights(model, e, sv_path)
-                avg_loss = sum(losses)/len(losses)
-                print('Average Loss for Epoch: {}'.format(avg_loss))
-                f.write('{}\n'.format(avg_loss))
+    for e in tqdm(range(epoch)):
+        losses = []
+        print('\nEpoch {}'.format(e+1))
+        for img, label in DataLoader(src_path, trg_path, batch_size, augments=True):
 
-                # eval
-                if e > -1:
-                    acc = match(model, src_path, trg_path, 15, '')
-                    print('Accuracy for this epoch: {}'.format(acc))
-                    es.write('{}\n'.format(acc))
+            if img.shape[0] != batch_size*2:
+                continue
+
+            optimizer.zero_grad()
+            pred = model(img)
+            loss = contrast_loss_func(pred, label, 0.05)
+            loss.backward()
+            optimizer.step()
+            print('Total loss for this batch: {}'.format(loss.item()))
+            losses.append(loss.item())
+
+        save_weights(model, e+1, sv_path)
+        avg_loss = sum(losses)/len(losses)
+        print('Average Loss for Epoch: {}'.format(avg_loss))
+        log_avg_loss.append(avg_loss)
+
+        # eval
+        if e > -1 and eval:
+            eval_acc = match(model, src_path, trg_path, 15, '')
+            print('Accuracy for this epoch: {}'.format(eval_acc))
+            log_eval_acc.append(eval_acc)
+
+    if metrics:
+        with open(metrics + 'avgLoss.txt', 'w') as lossfile, open(metrics + 'evalAcc.txt', 'w') as evalfile:
+            lossfile.write('{}\n'.format())
+            evalfile.write('{}\n'.format())
 
 
 def contrast_loss_func(output, target, temp=0.05):
@@ -64,13 +72,13 @@ def save_weights(model, id, save_path):
         if 'model' in key:
             del state_dict[key]
 
-    torch.save(state_dict, '{}/weights_2-27_{}.pt'.format(save_path, id))
+    torch.save(state_dict, '{}/{}.pt'.format(save_path, id))
 
 
 if __name__ == '__main__':
     parser = argparse.ArgumentParser()
     parser.add_argument('--weights', type=str,
-                        default='weights/weights_1-19_130.pt', help='initial weights path')
+                        default='', help='initial weights path')
     parser.add_argument('--source', type=str,
                         default='./source', help='source image folder path')
     parser.add_argument('--target', type=str,
@@ -82,15 +90,26 @@ if __name__ == '__main__':
                         default=1e-5, help='learning rate')
     parser.add_argument('--weight-decay', type=float,
                         default=1e-3, help='weight decay (L2 penalty)')
-    parser.add_argument('--device', default='cuda',
+    parser.add_argument('--dropout', type=float,
+                        default=0.3, help='dropout probability while training')
+    parser.add_argument('--device', type=str, default='cuda',
                         help='cuda device, i.e. 0 or 0,1,2,3 or cpu')
     parser.add_argument('--save-dir', type=str,
                         default='./weights', help='path to save weights')
+    parser.add_argument('--metrics', type=str,
+                        default='', help='Save avg loss and eval accuracy to separate files within given folder')
+    parser.add_argument('--eval', type=bool,
+                        default=False, help='Run matching after every epoch')
+    # parser.add_argument('--freeze', type=bool,
+    #                    default=False, help='Freeze backbone weights')
     opt = parser.parse_args()
 
     model = ModelCombo().to(opt.device)
-    model.load_state_dict(torch.load(opt.weights), strict=False)
 
+    if opt.weights:
+        model.load_state_dict(torch.load(opt.weights), strict=False)
+
+    # if opt.freeze:
     for name, param in model.named_parameters():
         if param.requires_grad and 'model' in name:
             param.requires_grad = False
@@ -98,10 +117,10 @@ if __name__ == '__main__':
     nonfrozen_params = [
         param for param in model.parameters() if param.requires_grad]
 
-    # learn_rate = opt.batch_size/256*0.3
-
     optimize = optim.SGD(nonfrozen_params, lr=opt.learning_rate,
                          momentum=0.9, weight_decay=opt.weight_decay)
-    # optimizer = torch.optim.AdamW()
+
+    # optimizer = torch.optim.Adam(nonfrozen_params, lr=opt.learning_rate)
+
     train(model, optimize, opt.batch_size, opt.epochs,
-          opt.source, opt.target, opt.save_dir)
+          opt.source, opt.target, opt.save_dir, eval=opt.eval, metrics=opt.metrics)
