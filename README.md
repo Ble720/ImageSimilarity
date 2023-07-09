@@ -32,7 +32,6 @@ python train.py --weights ./weights/t1/0.pt --source source_path --target target
 
 Run the following script in a command line or in the run.ipynb file provided. Use --help to display all options and descriptions.
 
-To 
 ```shell
 python match.py --weights weight_path --topk 15 --source source_folder_path --target target_folder_path --output-folder output_folder_path
 ```
